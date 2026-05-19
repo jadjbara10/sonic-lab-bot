@@ -1,23 +1,33 @@
 /**
- * Sonic Lab - Facebook Messenger API Integration
+ * Sonic Lab Messenger Bot - Facebook Messenger API Integration
+ * التعامل مع API مسنجر فيسبوك
  */
 
 const axios = require('axios');
+
 const FB_GRAPH_API = 'https://graph.facebook.com/v19.0';
 
+/**
+ * Send text message with optional quick replies
+ */
 async function sendMessage(pageAccessToken, recipientId, text, quickReplies = null) {
   const message = { text };
+
   if (quickReplies && quickReplies.length > 0) {
     message.quick_replies = quickReplies.map(qr => ({
       content_type: 'text',
-      title: qr.title.substring(0, 20),
+      title: qr.title.substring(0, 20), // FB limit: 20 chars
       payload: qr.payload
     }));
   }
+
   try {
     const response = await axios.post(
       `${FB_GRAPH_API}/me/messages?access_token=${pageAccessToken}`,
-      { recipient: { id: recipientId }, message }
+      {
+        recipient: { id: recipientId },
+        message
+      }
     );
     console.log(`[MSG SENT] To: ${recipientId}, Len: ${text.length}`);
     return response.data;
@@ -27,15 +37,26 @@ async function sendMessage(pageAccessToken, recipientId, text, quickReplies = nu
   }
 }
 
+/**
+ * Send typing indicator
+ */
 async function sendTypingIndicator(pageAccessToken, recipientId) {
   try {
     await axios.post(
       `${FB_GRAPH_API}/me/messages?access_token=${pageAccessToken}`,
-      { recipient: { id: recipientId }, sender_action: 'typing_on' }
+      {
+        recipient: { id: recipientId },
+        sender_action: 'typing_on'
+      }
     );
-  } catch (error) {}
+  } catch (error) {
+    // Silently ignore typing indicator errors
+  }
 }
 
+/**
+ * Get user profile info
+ */
 async function getUserProfile(pageAccessToken, userId) {
   try {
     const response = await axios.get(
@@ -48,33 +69,56 @@ async function getUserProfile(pageAccessToken, userId) {
   }
 }
 
+/**
+ * Verify webhook signature
+ */
 function verifySignature(appSecret, payload, signature) {
   const crypto = require('crypto');
   if (!signature) return false;
+
   const elements = signature.split('=');
   const method = elements[0];
   const signatureHash = elements[1];
+
   const expectedHash = crypto
     .createHmac(method === 'sha1' ? 'sha1' : 'sha256', appSecret)
     .update(payload)
     .digest('hex');
+
   return signatureHash === expectedHash;
 }
 
+/**
+ * Set persistent menu on the page
+ */
 async function setPersistentMenu(pageAccessToken) {
   try {
     await axios.post(
       `${FB_GRAPH_API}/me/messenger_profile?access_token=${pageAccessToken}`,
       {
-        persistent_menu: [{
-          locale: 'default',
-          composer_input_disabled: false,
-          call_to_actions: [
-            { title: '🎵 اطلب أغنية', type: 'postback', payload: 'START_LEAD' },
-            { title: '💰 الأسعار', type: 'postback', payload: 'PRICING' },
-            { title: '📞 تواصل معنا', type: 'postback', payload: 'CONTACT' }
-          ]
-        }]
+        persistent_menu: [
+          {
+            locale: 'default',
+            composer_input_disabled: false,
+            call_to_actions: [
+              {
+                title: '🎵 اطلب أغنية',
+                type: 'postback',
+                payload: 'START_LEAD'
+              },
+              {
+                title: '💰 الأسعار',
+                type: 'postback',
+                payload: 'PRICING'
+              },
+              {
+                title: '📞 تواصل معنا',
+                type: 'postback',
+                payload: 'CONTACT'
+              }
+            ]
+          }
+        ]
       }
     );
     console.log('[PERSISTENT MENU] Set successfully');
@@ -83,11 +127,18 @@ async function setPersistentMenu(pageAccessToken) {
   }
 }
 
+/**
+ * Set get started button
+ */
 async function setGetStarted(pageAccessToken) {
   try {
     await axios.post(
       `${FB_GRAPH_API}/me/messenger_profile?access_token=${pageAccessToken}`,
-      { get_started: { payload: 'GET_STARTED' } }
+      {
+        get_started: {
+          payload: 'GET_STARTED'
+        }
+      }
     );
     console.log('[GET STARTED] Set successfully');
   } catch (error) {
@@ -95,15 +146,20 @@ async function setGetStarted(pageAccessToken) {
   }
 }
 
+/**
+ * Set greeting text
+ */
 async function setGreeting(pageAccessToken) {
   try {
     await axios.post(
       `${FB_GRAPH_API}/me/messenger_profile?access_token=${pageAccessToken}`,
       {
-        greeting: [{
-          locale: 'default',
-          text: 'هلا! 🎵 أهلاً فيك في سونيك لاب - بنصنع أغاني مخصصة لكل المناسبات! اضغط "ابدأ" وكيف بنقدر نخدمك 😊'
-        }]
+        greeting: [
+          {
+            locale: 'default',
+            text: 'هلا! 🎵 أهلاً فيك في سونيك لاب - بنصنع أغاني مخصصة لكل المناسبات! اضغط "ابدأ" وكيف بنقدر نخدمك 😊'
+          }
+        ]
       }
     );
     console.log('[GREETING] Set successfully');
@@ -113,6 +169,11 @@ async function setGreeting(pageAccessToken) {
 }
 
 module.exports = {
-  sendMessage, sendTypingIndicator, getUserProfile,
-  verifySignature, setPersistentMenu, setGetStarted, setGreeting
+  sendMessage,
+  sendTypingIndicator,
+  getUserProfile,
+  verifySignature,
+  setPersistentMenu,
+  setGetStarted,
+  setGreeting
 };
