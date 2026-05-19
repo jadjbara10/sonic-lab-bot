@@ -14,3 +14,5 @@ services:
         sync: false
       - key: FB_VERIFY_TOKEN
         value: sonic_lab_verify_2026
+      - key: FB_APP_SECRET
+        sync: false
