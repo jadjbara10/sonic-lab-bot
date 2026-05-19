@@ -77,9 +77,14 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', (req, res) => {
   const body = req.body;
 
-  // Skip signature verification for now (app in development mode)
-  // TODO: Enable when App Secret is properly configured
-  console.log('[WEBHOOK] Signature verification skipped (development mode)');
+  // Verify webhook signature for security
+  if (APP_SECRET) {
+    const signature = req.headers['x-hub-signature-256'] || req.headers['x-hub-signature'];
+    if (!verifySignature(APP_SECRET, req.rawBody, signature)) {
+      console.error('[WEBHOOK] Invalid signature');
+      return res.sendStatus(403);
+    }
+  }
 
   // Check this is a page subscription
   if (body.object !== 'page') {
