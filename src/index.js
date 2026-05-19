@@ -77,8 +77,8 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', (req, res) => {
   const body = req.body;
 
-  // Verify webhook signature for security
-  if (APP_SECRET) {
+  // Verify webhook signature for security (skip if placeholder secret)
+  if (APP_SECRET && !APP_SECRET.startsWith('PLACEHOLDER')) {
     const signature = req.headers['x-hub-signature-256'] || req.headers['x-hub-signature'];
     if (!verifySignature(APP_SECRET, req.rawBody, signature)) {
       console.error('[WEBHOOK] Invalid signature');
