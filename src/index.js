@@ -9,6 +9,8 @@
 
 require('dotenv').config();
 const express = require('express');
+const https = require('https');
+const http = require('http');
 const { processMessage, STATES } = require('./conversation');
 const { sendMessage, sendTypingIndicator, verifySignature, setPersistentMenu, setGetStarted, setGreeting, getUserProfile } = require('./messenger');
 const { initAI, generateResponse } = require('./ai');
@@ -20,6 +22,7 @@ const PORT = process.env.PORT || 3000;
 const PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
 const APP_SECRET = process.env.FB_APP_SECRET;
 const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || 'sonic_lab_verify_2026';
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://sonic-lab-bot.onrender.com';
 
 // Middleware - raw body for signature verification
 app.use(express.json({
@@ -37,6 +40,21 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Keep-alive self-ping (every 14 minutes to prevent Render spin-down)
+function startKeepAlive() {
+  const interval = 14 * 60 * 1000; // 14 minutes
+  setInterval(() => {
+    const url = `${RENDER_URL}/health`;
+    const module = url.startsWith('https') ? https : http;
+    module.get(url, (res) => {
+      console.log(`[KEEP-ALIVE] Ping sent, status: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error(`[KEEP-ALIVE] Error: ${err.message}`);
+    });
+  }, interval);
+  console.log(`[KEEP-ALIVE] Self-ping enabled every 14 min → ${RENDER_URL}/health`);
+}
 
 // Webhook verification (Facebook requires this)
 app.get('/webhook', (req, res) => {
@@ -216,6 +234,9 @@ async function start() {
     console.log(`[WEBHOOK] http://localhost:${PORT}/webhook`);
     console.log(`[HEALTH] http://localhost:${PORT}/health`);
   });
+
+  // Start keep-alive self-ping
+  startKeepAlive();
 
   // Set up Messenger profile (only if token is available)
   if (PAGE_ACCESS_TOKEN) {
