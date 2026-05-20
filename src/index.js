@@ -1,10 +1,6 @@
 /**
  * Sonic Lab Messenger Bot - Main Server
- * الخادم الرئيسي لبوت سونيك لاب للمسنجر
- *
- * FREE 24/7 Cloud Deployment on Render.com
- * AI-Powered with Google Gemini (Free Tier)
- * Jordanian Arabic Dialect
+ * v1.1 - Added debug endpoint and improved logging
  */
 
 require('dotenv').config();
@@ -23,6 +19,13 @@ const PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
 const APP_SECRET = process.env.FB_APP_SECRET;
 const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || 'sonic_lab_verify_2026';
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://sonic-lab-bot.onrender.com';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'JBARA2026';
+
+// Log config on startup
+console.log('[CONFIG] FB_APP_SECRET set:', !!APP_SECRET, 'starts with:', APP_SECRET ? APP_SECRET.substring(0, 6) + '...' : 'NOT SET');
+console.log('[CONFIG] FB_PAGE_ACCESS_TOKEN set:', !!PAGE_ACCESS_TOKEN);
+console.log('[CONFIG] FB_VERIFY_TOKEN:', VERIFY_TOKEN);
+console.log('[CONFIG] GEMINI_API_KEY set:', !!process.env.GEMINI_API_KEY);
 
 // Middleware - raw body for signature verification
 app.use(express.json({
@@ -31,7 +34,7 @@ app.use(express.json({
   }
 }));
 
-// Health check endpoint (for UptimeRobot keep-alive)
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
@@ -41,9 +44,27 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Keep-alive self-ping (every 14 minutes to prevent Render spin-down)
+// Debug endpoint (protected by admin key)
+app.get('/debug', (req, res) => {
+  const key = req.query.key;
+  if (key !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+  res.json({
+    fb_app_secret_set: !!APP_SECRET,
+    fb_app_secret_prefix: APP_SECRET ? APP_SECRET.substring(0, 6) + '...' : 'NOT_SET',
+    fb_page_token_set: !!PAGE_ACCESS_TOKEN,
+    fb_page_token_prefix: PAGE_ACCESS_TOKEN ? PAGE_ACCESS_TOKEN.substring(0, 10) + '...' : 'NOT_SET',
+    verify_token: VERIFY_TOKEN,
+    gemini_key_set: !!process.env.GEMINI_API_KEY,
+    render_url: RENDER_URL,
+    node_env: process.env.NODE_ENV
+  });
+});
+
+// Keep-alive self-ping
 function startKeepAlive() {
-  const interval = 14 * 60 * 1000; // 14 minutes
+  const interval = 14 * 60 * 1000;
   setInterval(() => {
     const url = `${RENDER_URL}/health`;
     const module = url.startsWith('https') ? https : http;
@@ -56,7 +77,7 @@ function startKeepAlive() {
   console.log(`[KEEP-ALIVE] Self-ping enabled every 14 min → ${RENDER_URL}/health`);
 }
 
-// Webhook verification (Facebook requires this)
+// Webhook verification
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -77,13 +98,15 @@ app.get('/webhook', (req, res) => {
 app.post('/webhook', (req, res) => {
   const body = req.body;
 
-  // Verify webhook signature for security (skip if placeholder secret)
-  if (APP_SECRET && !APP_SECRET.startsWith('PLACEHOLDER')) {
+  // Verify webhook signature for security
+  if (APP_SECRET) {
     const signature = req.headers['x-hub-signature-256'] || req.headers['x-hub-signature'];
     if (!verifySignature(APP_SECRET, req.rawBody, signature)) {
-      console.error('[WEBHOOK] Invalid signature');
+      console.error('[WEBHOOK] Invalid signature. Secret prefix:', APP_SECRET.substring(0, 6));
       return res.sendStatus(403);
     }
+  } else {
+    console.warn('[WEBHOOK] WARNING: FB_APP_SECRET not set, skipping signature verification');
   }
 
   // Check this is a page subscription
@@ -112,7 +135,7 @@ app.post('/webhook', (req, res) => {
     }
   }
 
-  // Return 200 quickly (Facebook requires fast response)
+  // Return 200 quickly
   res.status(200).send('EVENT_RECEIVED');
 });
 
@@ -124,11 +147,11 @@ async function handleMessage(senderId, message) {
     // Ignore echoes and non-text messages (for now)
     if (message.is_echo || message.app_id) return;
 
-    console.log(`[MSG RECEIVED] From: ${senderId}`);
+    console.log(`[MSG RECEIVED] From: ${senderId}, Text: ${message.text || '(no text)'}`);
 
     // Get message text
     const messageText = message.text || '';
-    const quickReplyPayload = message.quick_reply?.payload || null;
+    const quickReplyPayload = message.quick_reply ? message.quick_reply.payload : null;
 
     // If it's just a quick reply without text, use the payload
     const inputText = messageText || quickReplyPayload || '';
@@ -181,8 +204,6 @@ async function handlePostback(senderId, postback) {
   switch (payload) {
     case 'GET_STARTED':
       // First interaction
-      const result = processMessage(senderId, '', 'GET_STARTED');
-      // Override with greeting
       await sendMessage(PAGE_ACCESS_TOKEN, senderId,
         "هلا والله! 🎵 منورتنا في سونيك لاب! بنصنع أغاني مخصصة لكل المناسبات - فرح، عيد ميلاد، ذكرى، أو أي شي ببالك! كيف بقدر أخدمك؟",
         [
@@ -213,7 +234,7 @@ async function handlePostback(senderId, postback) {
 // ===== Start Server =====
 async function start() {
   console.log('==========================================');
-  console.log('🎵 Sonic Lab Messenger Bot v1.0');
+  console.log('🎵 Sonic Lab Messenger Bot v1.1');
   console.log('==========================================');
 
   // Validate required env vars
