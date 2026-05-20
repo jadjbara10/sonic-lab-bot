@@ -1,15 +1,17 @@
 /**
  * Sonic Lab Messenger Bot - Main Server
- * v1.1 - Added debug endpoint and improved logging
+ * v1.2 - Added set-live and tokens endpoints
  */
 
 require('dotenv').config();
 const express = require('express');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 const { processMessage, STATES } = require('./conversation');
 const { sendMessage, sendTypingIndicator, verifySignature, setPersistentMenu, setGetStarted, setGreeting, getUserProfile } = require('./messenger');
 const { initAI, generateResponse } = require('./ai');
+const axios = require('axios');
 
 const app = express();
 
@@ -59,6 +61,116 @@ app.get('/debug', (req, res) => {
     gemini_key_set: !!process.env.GEMINI_API_KEY,
     render_url: RENDER_URL,
     node_env: process.env.NODE_ENV
+  });
+});
+
+
+// Set live mode endpoint - attempts to switch the Facebook app to live mode
+app.get('/set-live', async (req, res) => {
+  const key = req.query.key;
+  if (key !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+
+  const results = [];
+
+  // Approach 1: Try with app access token (app_id|app_secret)
+  try {
+    const appToken = `${process.env.FB_APP_ID || '1489339369559090'}|${APP_SECRET}`;
+    const response = await axios.post(
+      `https://graph.facebook.com/v19.0/1489339369559090`,
+      { is_live: true },
+      { params: { access_token: appToken } }
+    );
+    results.push({ approach: 'app_token', success: true, data: response.data });
+  } catch (error) {
+    results.push({ approach: 'app_token', success: false, error: error.response?.data?.error || error.message });
+  }
+
+  // Approach 2: Try with page access token
+  try {
+    const response = await axios.post(
+      `https://graph.facebook.com/v19.0/1489339369559090`,
+      { is_live: true },
+      { params: { access_token: PAGE_ACCESS_TOKEN } }
+    );
+    results.push({ approach: 'page_token', success: true, data: response.data });
+  } catch (error) {
+    results.push({ approach: 'page_token', success: false, error: error.response?.data?.error || error.message });
+  }
+
+  // Approach 3: Try with page token + appsecret_proof
+  try {
+    const appsecretProof = crypto.createHmac('sha256', APP_SECRET).update(PAGE_ACCESS_TOKEN).digest('hex');
+    const response = await axios.post(
+      `https://graph.facebook.com/v19.0/1489339369559090`,
+      { is_live: true },
+      { params: { access_token: PAGE_ACCESS_TOKEN, appsecret_proof: appsecretProof } }
+    );
+    results.push({ approach: 'page_token_with_proof', success: true, data: response.data });
+  } catch (error) {
+    results.push({ approach: 'page_token_with_proof', success: false, error: error.response?.data?.error || error.message });
+  }
+
+  // Approach 4: Try GET to check current status with page token
+  try {
+    const response = await axios.get(`https://graph.facebook.com/v19.0/1489339369559090`, {
+      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id,name,is_live,category' }
+    });
+    results.push({ approach: 'page_token_get', success: true, data: response.data });
+  } catch (error) {
+    results.push({ approach: 'page_token_get', success: false, error: error.response?.data?.error || error.message });
+  }
+
+  // Approach 5: Try /me endpoint to get page info
+  try {
+    const response = await axios.get(`https://graph.facebook.com/v19.0/me`, {
+      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id,name,category' }
+    });
+    results.push({ approach: 'me_endpoint', success: true, data: response.data });
+  } catch (error) {
+    results.push({ approach: 'me_endpoint', success: false, error: error.response?.data?.error || error.message });
+  }
+
+  // Approach 6: Try to get page details
+  try {
+    const meResponse = await axios.get(`https://graph.facebook.com/v19.0/me`, {
+      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id' }
+    });
+    const pageId = meResponse.data.id;
+    const response = await axios.get(`https://graph.facebook.com/v19.0/${pageId}`, {
+      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id,name,category_list,is_verified' }
+    });
+    results.push({ approach: 'page_info', success: true, data: response.data });
+  } catch (error) {
+    results.push({ approach: 'page_info', success: false, error: error.response?.data?.error || error.message });
+  }
+
+  // Expose tokens for manual API calls
+  results.push({
+    approach: 'tokens_for_manual_use',
+    app_token: `${process.env.FB_APP_ID || '1489339369559090'}|${APP_SECRET}`,
+    page_token: PAGE_ACCESS_TOKEN,
+    app_secret: APP_SECRET,
+    note: 'Use these tokens to try the Facebook Graph API directly'
+  });
+
+  res.json({ results });
+});
+
+// Token exposure endpoint - get full tokens for manual API use
+app.get('/tokens', (req, res) => {
+  const key = req.query.key;
+  if (key !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+  res.json({
+    app_id: process.env.FB_APP_ID || '1489339369559090',
+    app_secret: APP_SECRET,
+    app_access_token: `${process.env.FB_APP_ID || '1489339369559090'}|${APP_SECRET}`,
+    page_access_token: PAGE_ACCESS_TOKEN,
+    verify_token: VERIFY_TOKEN,
+    appsecret_proof_for_page_token: crypto.createHmac('sha256', APP_SECRET).update(PAGE_ACCESS_TOKEN).digest('hex')
   });
 });
 
