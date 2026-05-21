@@ -1,17 +1,19 @@
 /**
  * Sonic Lab Messenger Bot - Main Server
- * v1.2 - Added set-live and tokens endpoints
+ * الخادم الرئيسي لبوت سونيك لاب للمسنجر
+ *
+ * FREE 24/7 Cloud Deployment on Render.com
+ * AI-Powered with Google Gemini (Free Tier)
+ * Jordanian Arabic Dialect
  */
 
 require('dotenv').config();
 const express = require('express');
 const https = require('https');
 const http = require('http');
-const crypto = require('crypto');
 const { processMessage, STATES } = require('./conversation');
 const { sendMessage, sendTypingIndicator, verifySignature, setPersistentMenu, setGetStarted, setGreeting, getUserProfile } = require('./messenger');
 const { initAI, generateResponse } = require('./ai');
-const axios = require('axios');
 
 const app = express();
 
@@ -21,13 +23,6 @@ const PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
 const APP_SECRET = process.env.FB_APP_SECRET;
 const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || 'sonic_lab_verify_2026';
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL || 'https://sonic-lab-bot.onrender.com';
-const ADMIN_KEY = process.env.ADMIN_KEY || 'JBARA2026';
-
-// Log config on startup
-console.log('[CONFIG] FB_APP_SECRET set:', !!APP_SECRET, 'starts with:', APP_SECRET ? APP_SECRET.substring(0, 6) + '...' : 'NOT SET');
-console.log('[CONFIG] FB_PAGE_ACCESS_TOKEN set:', !!PAGE_ACCESS_TOKEN);
-console.log('[CONFIG] FB_VERIFY_TOKEN:', VERIFY_TOKEN);
-console.log('[CONFIG] GEMINI_API_KEY set:', !!process.env.GEMINI_API_KEY);
 
 // Middleware - raw body for signature verification
 app.use(express.json({
@@ -36,7 +31,7 @@ app.use(express.json({
   }
 }));
 
-// Health check endpoint
+// Health check endpoint (for UptimeRobot keep-alive)
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'healthy',
@@ -46,137 +41,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Debug endpoint (protected by admin key)
-app.get('/debug', (req, res) => {
-  const key = req.query.key;
-  if (key !== ADMIN_KEY) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  res.json({
-    fb_app_secret_set: !!APP_SECRET,
-    fb_app_secret_prefix: APP_SECRET ? APP_SECRET.substring(0, 6) + '...' : 'NOT_SET',
-    fb_page_token_set: !!PAGE_ACCESS_TOKEN,
-    fb_page_token_prefix: PAGE_ACCESS_TOKEN ? PAGE_ACCESS_TOKEN.substring(0, 10) + '...' : 'NOT_SET',
-    verify_token: VERIFY_TOKEN,
-    gemini_key_set: !!process.env.GEMINI_API_KEY,
-    render_url: RENDER_URL,
-    node_env: process.env.NODE_ENV
-  });
-});
-
-
-// Set live mode endpoint - attempts to switch the Facebook app to live mode
-app.get('/set-live', async (req, res) => {
-  const key = req.query.key;
-  if (key !== ADMIN_KEY) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-
-  const results = [];
-
-  // Approach 1: Try with app access token (app_id|app_secret)
-  try {
-    const appToken = `${process.env.FB_APP_ID || '1489339369559090'}|${APP_SECRET}`;
-    const response = await axios.post(
-      `https://graph.facebook.com/v19.0/1489339369559090`,
-      { is_live: true },
-      { params: { access_token: appToken } }
-    );
-    results.push({ approach: 'app_token', success: true, data: response.data });
-  } catch (error) {
-    results.push({ approach: 'app_token', success: false, error: error.response?.data?.error || error.message });
-  }
-
-  // Approach 2: Try with page access token
-  try {
-    const response = await axios.post(
-      `https://graph.facebook.com/v19.0/1489339369559090`,
-      { is_live: true },
-      { params: { access_token: PAGE_ACCESS_TOKEN } }
-    );
-    results.push({ approach: 'page_token', success: true, data: response.data });
-  } catch (error) {
-    results.push({ approach: 'page_token', success: false, error: error.response?.data?.error || error.message });
-  }
-
-  // Approach 3: Try with page token + appsecret_proof
-  try {
-    const appsecretProof = crypto.createHmac('sha256', APP_SECRET).update(PAGE_ACCESS_TOKEN).digest('hex');
-    const response = await axios.post(
-      `https://graph.facebook.com/v19.0/1489339369559090`,
-      { is_live: true },
-      { params: { access_token: PAGE_ACCESS_TOKEN, appsecret_proof: appsecretProof } }
-    );
-    results.push({ approach: 'page_token_with_proof', success: true, data: response.data });
-  } catch (error) {
-    results.push({ approach: 'page_token_with_proof', success: false, error: error.response?.data?.error || error.message });
-  }
-
-  // Approach 4: Try GET to check current status with page token
-  try {
-    const response = await axios.get(`https://graph.facebook.com/v19.0/1489339369559090`, {
-      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id,name,is_live,category' }
-    });
-    results.push({ approach: 'page_token_get', success: true, data: response.data });
-  } catch (error) {
-    results.push({ approach: 'page_token_get', success: false, error: error.response?.data?.error || error.message });
-  }
-
-  // Approach 5: Try /me endpoint to get page info
-  try {
-    const response = await axios.get(`https://graph.facebook.com/v19.0/me`, {
-      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id,name,category' }
-    });
-    results.push({ approach: 'me_endpoint', success: true, data: response.data });
-  } catch (error) {
-    results.push({ approach: 'me_endpoint', success: false, error: error.response?.data?.error || error.message });
-  }
-
-  // Approach 6: Try to get page details
-  try {
-    const meResponse = await axios.get(`https://graph.facebook.com/v19.0/me`, {
-      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id' }
-    });
-    const pageId = meResponse.data.id;
-    const response = await axios.get(`https://graph.facebook.com/v19.0/${pageId}`, {
-      params: { access_token: PAGE_ACCESS_TOKEN, fields: 'id,name,category_list,is_verified' }
-    });
-    results.push({ approach: 'page_info', success: true, data: response.data });
-  } catch (error) {
-    results.push({ approach: 'page_info', success: false, error: error.response?.data?.error || error.message });
-  }
-
-  // Expose tokens for manual API calls
-  results.push({
-    approach: 'tokens_for_manual_use',
-    app_token: `${process.env.FB_APP_ID || '1489339369559090'}|${APP_SECRET}`,
-    page_token: PAGE_ACCESS_TOKEN,
-    app_secret: APP_SECRET,
-    note: 'Use these tokens to try the Facebook Graph API directly'
-  });
-
-  res.json({ results });
-});
-
-// Token exposure endpoint - get full tokens for manual API use
-app.get('/tokens', (req, res) => {
-  const key = req.query.key;
-  if (key !== ADMIN_KEY) {
-    return res.status(403).json({ error: 'Unauthorized' });
-  }
-  res.json({
-    app_id: process.env.FB_APP_ID || '1489339369559090',
-    app_secret: APP_SECRET,
-    app_access_token: `${process.env.FB_APP_ID || '1489339369559090'}|${APP_SECRET}`,
-    page_access_token: PAGE_ACCESS_TOKEN,
-    verify_token: VERIFY_TOKEN,
-    appsecret_proof_for_page_token: crypto.createHmac('sha256', APP_SECRET).update(PAGE_ACCESS_TOKEN).digest('hex')
-  });
-});
-
-// Keep-alive self-ping
+// Keep-alive self-ping (every 14 minutes to prevent Render spin-down)
 function startKeepAlive() {
-  const interval = 14 * 60 * 1000;
+  const interval = 14 * 60 * 1000; // 14 minutes
   setInterval(() => {
     const url = `${RENDER_URL}/health`;
     const module = url.startsWith('https') ? https : http;
@@ -189,7 +56,7 @@ function startKeepAlive() {
   console.log(`[KEEP-ALIVE] Self-ping enabled every 14 min → ${RENDER_URL}/health`);
 }
 
-// Webhook verification
+// Webhook verification (Facebook requires this)
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -214,11 +81,9 @@ app.post('/webhook', (req, res) => {
   if (APP_SECRET) {
     const signature = req.headers['x-hub-signature-256'] || req.headers['x-hub-signature'];
     if (!verifySignature(APP_SECRET, req.rawBody, signature)) {
-      console.error('[WEBHOOK] Invalid signature. Secret prefix:', APP_SECRET.substring(0, 6));
+      console.error('[WEBHOOK] Invalid signature');
       return res.sendStatus(403);
     }
-  } else {
-    console.warn('[WEBHOOK] WARNING: FB_APP_SECRET not set, skipping signature verification');
   }
 
   // Check this is a page subscription
@@ -247,7 +112,7 @@ app.post('/webhook', (req, res) => {
     }
   }
 
-  // Return 200 quickly
+  // Return 200 quickly (Facebook requires fast response)
   res.status(200).send('EVENT_RECEIVED');
 });
 
@@ -259,11 +124,11 @@ async function handleMessage(senderId, message) {
     // Ignore echoes and non-text messages (for now)
     if (message.is_echo || message.app_id) return;
 
-    console.log(`[MSG RECEIVED] From: ${senderId}, Text: ${message.text || '(no text)'}`);
+    console.log(`[MSG RECEIVED] From: ${senderId}`);
 
     // Get message text
     const messageText = message.text || '';
-    const quickReplyPayload = message.quick_reply ? message.quick_reply.payload : null;
+    const quickReplyPayload = message.quick_reply?.payload || null;
 
     // If it's just a quick reply without text, use the payload
     const inputText = messageText || quickReplyPayload || '';
@@ -316,6 +181,8 @@ async function handlePostback(senderId, postback) {
   switch (payload) {
     case 'GET_STARTED':
       // First interaction
+      const result = processMessage(senderId, '', 'GET_STARTED');
+      // Override with greeting
       await sendMessage(PAGE_ACCESS_TOKEN, senderId,
         "هلا والله! 🎵 منورتنا في سونيك لاب! بنصنع أغاني مخصصة لكل المناسبات - فرح، عيد ميلاد، ذكرى، أو أي شي ببالك! كيف بقدر أخدمك؟",
         [
@@ -346,7 +213,7 @@ async function handlePostback(senderId, postback) {
 // ===== Start Server =====
 async function start() {
   console.log('==========================================');
-  console.log('🎵 Sonic Lab Messenger Bot v1.1');
+  console.log('🎵 Sonic Lab Messenger Bot v1.0');
   console.log('==========================================');
 
   // Validate required env vars
