@@ -9,7 +9,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: GEMINI_API_KEY
-        sync: false
+        value: AIzaSyASRphmMPOCy0cRD8ik5l563K4fQXHXJm0
       - key: FB_PAGE_ACCESS_TOKEN
         sync: false
       - key: FB_VERIFY_TOKEN
